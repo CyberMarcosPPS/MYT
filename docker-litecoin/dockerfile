@@ -1,0 +1,64 @@
+# Use a base image with gpg and wget for downloading and verifying Litecoin
+FROM ubuntu:20.04 as builder
+
+# Install necessary packages for downloading and verifying
+RUN apt-get update && apt-get install -y wget gnupg
+
+# Working directory for downloading and verifying Litecoin binaries
+WORKDIR /litecoin
+
+# Download Litecoin binaries and SHA256SUMS file
+# Replace the URL with the actual URL of Litecoin 0.21 release
+RUN wget https://download.litecoin.org/litecoin-0.21.0/linux/litecoin-0.21.0-x86_64-linux-gnu.tar.gz \
+    && wget https://download.litecoin.org/litecoin-0.21.0/linux/litecoin-0.21.0-x86_64-linux-gnu.tar.gz.asc \
+    && wget https://download.litecoin.org/litecoin-0.21.0/SHA256SUMS.asc
+
+# Import Litecoin release signing keys
+# Note: Replace 'FE3348877809386C' with the actual key ID from a trusted source
+RUN gpg --keyserver keyserver.ubuntu.com --recv-keys FE3348877809386C
+
+# Verify the downloaded binary with the SHA256SUMS file and gpg signature
+RUN gpg --verify SHA256SUMS.asc \
+    && grep " litecoin-0.21.0-x86_64-linux-gnu.tar.gz\$" SHA256SUMS.asc | sha256sum -c -
+
+# Unpack the Litecoin binaries
+RUN tar -xzvf litecoin-0.21.0-x86_64-linux-gnu.tar.gz
+
+# Start a new stage to keep the image small
+FROM ubuntu:20.04
+
+# Install required libraries
+# Note: The list of libraries may need to be adjusted based on Litecoin dependencies
+RUN apt-get update && apt-get install -y \
+    libboost-system-dev \
+    libboost-filesystem-dev \
+    libboost-chrono-dev \
+    libboost-program-options-dev \
+    libboost-test-dev \
+    libboost-thread-dev \
+    libevent-dev \
+    libminiupnpc-dev \
+    libzmq3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the Litecoin binaries from the builder stage
+COPY --from=builder /litecoin/litecoin-0.21.0/bin/* /usr/local/bin/
+
+# Create a non-root user to run the Litecoin daemon
+RUN useradd -r -m -U litecoin
+
+# Switch to the non-root user
+USER litecoin
+
+# Set the working directory to the non-root user's home directory
+WORKDIR /home/litecoin
+
+# Expose necessary ports
+# 9332 is the JSON-RPC port
+# 9333 is the P2P network port
+EXPOSE 9332 9333
+
+# Run the Litecoin daemon by default
+ENTRYPOINT ["litecoind"]
+CMD ["-printtoconsole"]
+
